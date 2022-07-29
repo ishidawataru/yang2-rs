@@ -330,6 +330,14 @@ impl DataTree {
         }
     }
 
+    /// Replace the internal lyd_node
+    pub unsafe fn replace(
+        &mut self,
+        src: *mut ffi::lyd_node,
+    ) -> *mut ffi::lyd_node {
+        std::mem::replace(&mut self.raw, src)
+    }
+
     /// Parse (and validate) input data as a YANG data tree.
     pub fn parse_file<F: AsRawFd>(
         context: &Arc<Context>,
