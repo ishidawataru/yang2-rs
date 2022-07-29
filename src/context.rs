@@ -20,14 +20,67 @@ use crate::schema::{SchemaModule, SchemaNode};
 use crate::utils::*;
 use libyang2_sys as ffi;
 
+pub trait ContextAllocator {
+    fn raw(&self) -> *mut ffi::ly_ctx;
+}
+
+struct DefaultContextAllocator {
+    raw: *mut ffi::ly_ctx,
+}
+
+impl DefaultContextAllocator {
+    pub fn new(options: ContextFlags) -> Result<Self> {
+        let mut context = std::ptr::null_mut();
+        let ctx_ptr = &mut context;
+
+        let ret =
+            unsafe { ffi::ly_ctx_new(std::ptr::null(), options.bits, ctx_ptr) };
+        if ret != ffi::LY_ERR::LY_SUCCESS {
+            // Need to construct error structure by hand.
+            return Err(Error {
+                errcode: ret,
+                msg: None,
+                path: None,
+                apptag: None,
+            });
+        }
+
+        Ok(DefaultContextAllocator { raw: context })
+    }
+}
+
+impl Drop for DefaultContextAllocator {
+    fn drop(&mut self) {
+        unsafe { ffi::ly_ctx_destroy(self.raw) };
+    }
+}
+
+impl ContextAllocator for DefaultContextAllocator {
+    fn raw(&self) -> *mut ffi::ly_ctx {
+        self.raw
+    }
+}
+
 /// Context of the YANG schemas.
 ///
 /// [Official C documentation]
 ///
 /// [Official C documentation]: https://netopeer.liberouter.org/doc/libyang/libyang2/html/howto_context.html
-#[derive(Debug, PartialEq)]
 pub struct Context {
+    _allocator: Box<dyn ContextAllocator + 'static>,
     pub(crate) raw: *mut ffi::ly_ctx,
+}
+
+impl PartialEq for Context {
+    fn eq(&self, other: &Self) -> bool {
+        self.raw == other.raw
+    }
+}
+
+impl std::fmt::Debug for Context {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.raw.fmt(f)
+    }
 }
 
 bitflags! {
@@ -82,23 +135,20 @@ impl Context {
     /// application is supposed to work with a single context in which
     /// libyang is holding all schemas (and other internal information)
     /// according to which the data trees will be processed and validated.
-    pub fn new(options: ContextFlags) -> Result<Context> {
-        let mut context = std::ptr::null_mut();
-        let ctx_ptr = &mut context;
+    pub fn new(options: ContextFlags) -> Result<Self> {
+        let a = DefaultContextAllocator::new(options)?;
+        Self::from_allocator(Box::new(a))
+    }
 
-        let ret =
-            unsafe { ffi::ly_ctx_new(std::ptr::null(), options.bits, ctx_ptr) };
-        if ret != ffi::LY_ERR::LY_SUCCESS {
-            // Need to construct error structure by hand.
-            return Err(Error {
-                errcode: ret,
-                msg: None,
-                path: None,
-                apptag: None,
-            });
-        }
+    pub fn from_allocator(
+        allocator: Box<dyn ContextAllocator + 'static>,
+    ) -> Result<Context> {
+        let raw = allocator.raw();
 
-        Ok(Context { raw: context })
+        Ok(Context {
+            _allocator: allocator,
+            raw: raw,
+        })
     }
 
     /// Add the search path into libyang context.
@@ -471,12 +521,6 @@ impl Context {
 
 unsafe impl Send for Context {}
 unsafe impl Sync for Context {}
-
-impl Drop for Context {
-    fn drop(&mut self) {
-        unsafe { ffi::ly_ctx_destroy(self.raw) };
-    }
-}
 
 // ===== impl EmbeddedModuleKey =====
 
