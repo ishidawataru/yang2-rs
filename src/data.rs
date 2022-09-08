@@ -538,12 +538,20 @@ impl DataTree {
 
     /// Create a copy of the data tree.
     pub fn duplicate(&self) -> Result<DataTree> {
+        self.duplicate_with_context(&self.context)
+    }
+
+    /// Create a copy of the data tree with a given context.
+    pub fn duplicate_with_context(
+        &self,
+        ctx: &Arc<Context>,
+    ) -> Result<DataTree> {
         let mut dup = std::ptr::null_mut();
         let dup_ptr = &mut dup;
 
         // Special handling for empty data trees.
         if self.raw.is_null() {
-            return Ok(DataTree::from_raw(&self.context, std::ptr::null_mut()));
+            return Ok(DataTree::from_raw(ctx, std::ptr::null_mut()));
         }
 
         let options = ffi::LYD_DUP_RECURSIVE | ffi::LYD_DUP_WITH_FLAGS;
@@ -556,10 +564,10 @@ impl DataTree {
             )
         };
         if ret != ffi::LY_ERR::LY_SUCCESS {
-            return Err(Error::new(&self.context));
+            return Err(Error::new(ctx));
         }
 
-        Ok(DataTree::from_raw(&self.context, dup))
+        Ok(DataTree::from_raw(ctx, dup))
     }
 
     /// Merge the source data tree into the target data tree. Merge may not be
@@ -568,7 +576,7 @@ impl DataTree {
     pub fn merge(&mut self, source: &DataTree) -> Result<()> {
         // Special handling for empty data trees.
         if self.raw.is_null() {
-            *self = source.duplicate()?;
+            *self = source.duplicate_with_context(&self.context)?;
         } else {
             let options = 0u16;
             let ret = unsafe {
